@@ -4,7 +4,13 @@ import os
 import glob
 import serial
 
-from pygrabber.dshow_graph import FilterGraph
+# for linux platform user must be part of group dialout use this command an log out : sudo usermod -aG dialout $USER
+
+if sys.platform.startswith("win"):
+    from pygrabber.dshow_graph import FilterGraph
+else:
+    FilterGraph = None  # placeholder for non-Windows
+
 import com 
 
 
@@ -47,55 +53,79 @@ class CameraWidget(QLabel):
         self.cap = None
         self.setText("Camera not connected")
         self.setAlignment(Qt.AlignCenter)
+
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
 
-    def start_camera(self, index=0):
-        # If a camera is already open, release it first
+        self.frame_skip = 0      # Number of frames to skip
+        self.frame_count = 0     # Counter for skipping frames
+
+        self.fps_display = False  # Set True to show FPS in console
+        self.last_time = cv2.getTickCount()
+
+    def start_camera(self, index=0, width=640, height=480):
+        # Release previous camera if any
         if hasattr(self, "cap") and self.cap is not None:
             if self.cap.isOpened():
                 print("Closing previously opened camera...")
                 self.cap.release()
                 self.timer.stop()
 
-        # Now open the new camera
+        # Open camera
         if sys.platform.startswith("win"):
-            # Use DirectShow backend on Windows
             self.cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         else:
             self.cap = cv2.VideoCapture(index)
 
-        # Check if the camera opened successfully
-        if self.cap.isOpened():
-            print(f"Camera started on index {index}")
-            self.timer.start(30)
-        else:
+        if not self.cap.isOpened():
             print("No camera detected")
             self.setText("No camera detected")
+            return
 
+        # Set camera resolution
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+        print(f"Camera started on index {index} at {width}x{height}")
+        self.timer.start(30)  # ~33 FPS
 
     def update_frame(self):
-        if self.cap is None:
+        if self.cap is None or not self.cap.isOpened():
             return
-        ret, frame = self.cap.read()
-        if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = frame.shape
-            qimg = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
 
-            # Use smooth transformation for scaling
-            pixmap = QPixmap.fromImage(qimg).scaled(
-                self.width(),
-                self.height(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation  # <-- this makes it smoother
-            )
-            self.setPixmap(pixmap)
+        # Skip frames if needed
+        self.frame_count += 1
+        if self.frame_count <= self.frame_skip:
+            return
+        self.frame_count = 0
+
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+
+        # Convert BGR -> RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Resize frame to label size (fast transformation)
+        frame = cv2.resize(frame, (self.width(), self.height()))
+
+        # Convert to QImage
+        h, w, ch = frame.shape
+        qimg = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
+        self.setPixmap(QPixmap.fromImage(qimg))
+
+        # Optional: display FPS in console
+        if self.fps_display:
+            now = cv2.getTickCount()
+            fps = cv2.getTickFrequency() / (now - self.last_time)
+            print(f"FPS: {fps:.1f}")
+            self.last_time = now
 
     def closeEvent(self, event):
-        if self.cap:
+        if self.cap and self.cap.isOpened():
             self.cap.release()
         event.accept()
+
 
 
 
