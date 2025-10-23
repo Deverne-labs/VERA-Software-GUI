@@ -51,16 +51,28 @@ class CameraWidget(QLabel):
         self.timer.timeout.connect(self.update_frame)
 
     def start_camera(self, index=0):
+        # If a camera is already open, release it first
+        if hasattr(self, "cap") and self.cap is not None:
+            if self.cap.isOpened():
+                print("Closing previously opened camera...")
+                self.cap.release()
+                self.timer.stop()
+
+        # Now open the new camera
         if sys.platform.startswith("win"):
             # Use DirectShow backend on Windows
             self.cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         else:
             self.cap = cv2.VideoCapture(index)
 
+        # Check if the camera opened successfully
         if self.cap.isOpened():
+            print(f"Camera started on index {index}")
             self.timer.start(30)
         else:
+            print("No camera detected")
             self.setText("No camera detected")
+
 
     def update_frame(self):
         if self.cap is None:
@@ -482,7 +494,6 @@ class MainWindow(QWidget):
         print("EXPORT LOG push")
 
     # --------- Connect Devices ---------
-
     def connect_devices(self):
         connected = False
 
@@ -508,6 +519,13 @@ class MainWindow(QWidget):
 
         # --------- Connect serial ---------
         serial_text = self.serial_port_combo.currentText()
+
+        # Close any existing serial connection first
+        if hasattr(self, "serial_conn") and self.serial_conn is not None:
+            if self.serial_conn.is_open:
+                print(f"Closing previously opened serial port {self.serial_conn.port}")
+                self.serial_conn.close()
+
         if serial_text:
             try:
                 # Open the serial port at 115200 baud
